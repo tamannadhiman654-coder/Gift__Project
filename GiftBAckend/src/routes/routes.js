@@ -1,6 +1,8 @@
 import express from 'express';
 import { auth } from '../middleware/auth.js';
 import { validate } from '../validation/all_validation.js';
+// import { upload } from '../middleware/upload.js';
+
 import multer from 'multer';
 
 import user_model from '../model/user_model.js';
