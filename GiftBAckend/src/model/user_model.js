@@ -2,6 +2,11 @@ import mongoose from 'mongoose';
 
 const userSchema = new mongoose.Schema(
   {
+    profileimage: {
+      public_id: String,
+      url: String,
+    },
+
     fname: {
       type: String,
       required: true,
@@ -56,32 +61,12 @@ const userSchema = new mongoose.Schema(
 
     verification: {
       user: {
-        otp: {
-          type: String,
-        },
-
-        otp_expires: {
-          type: Date,
-        },
-
-        is_verified: {
-          type: Boolean,
-          default: false,
-        },
-
-        otp_attempts: {
-          type: Number,
-          default: 0,
-        },
-
-        lock_until: {
-          type: Date,
-        },
-
-        lock_count: {
-          type: Number,
-          default: 0,
-        },
+        otp: { type: String },
+        otp_expires: { type: Date },
+        is_verified: { type: Boolean, default: false },
+        otp_attempts: { type: Number, default: 0 },
+        lock_until: { type: Date },
+        lock_count: { type: Number, default: 0 },
       },
     },
 
@@ -99,7 +84,6 @@ const userSchema = new mongoose.Schema(
       },
     ],
   },
-
   {
     timestamps: true,
   }

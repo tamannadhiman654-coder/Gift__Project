@@ -1,9 +1,10 @@
+import fs from 'fs';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import User from '../model/user_model.js';
 import { sendEmail } from '../mail/all_mail.js';
-import {uploadImage,deleteImage} from '../images/img.js'
+import { uploadImage, deleteImage } from '../images/img.js';
 import { AppError } from '../error/error_handling.js';
 
 // ---------- Constants ----------
@@ -51,17 +52,18 @@ const handleOTPFailure = async (user) => {
 // ---------- Controllers ----------
 
 export const register = async (req, res, next) => {
-   console.log("REGISTER CONTROLLER HIT");
   try {
     const { fname, lname, gender, email, password } = req.body;
-    
-    // const existing = await User.findOne({ email });
-    // if (existing) throw new AppError('Email already registered', 400);
-    
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      throw new AppError('Email already registered', 400);
+    }
+
     const hashed = await hashPassword(password);
     const otp = generateOTP();
     const otpExpires = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
-    
+
     const user = new User({
       fname,
       lname,
@@ -79,15 +81,13 @@ export const register = async (req, res, next) => {
         },
       },
     });
-    
+
     await user.save();
-   sendEmail(fname,email, otp);
-    console.log("ok")
+    await sendEmail(fname, email, otp);
 
     res.status(201).json({ message: 'User registered. OTP sent.', userId: user._id });
   } catch (error) {
-    console.log(res.send(error.message))
-    ;
+    next(error);
   }
 };
 
@@ -126,10 +126,10 @@ export const verifyOTP = async (req, res, next) => {
     verification.otp_expires = null;
     user.is_active = true;
 
-   user.save();
+    await user.save();
     res.status(200).json({ message: 'Account verified successfully' });
   } catch (error) {
-  console.log(error.message)
+    next(error);
   }
 };
 
@@ -138,9 +138,10 @@ export const resendOTP = async (req, res, next) => {
     const { email } = req.body;
     const user = await User.findOne({ email });
     if (!user) throw new AppError('User not found', 404);
-     console.log(user)
+
     const verification = user.verification.user;
-    const {fname} =user
+    const { fname } = user;
+
     if (verification.is_verified) throw new AppError('Account already verified', 400);
 
     const now = new Date();
@@ -159,7 +160,7 @@ export const resendOTP = async (req, res, next) => {
     verification.otp_attempts = 0;
 
     await user.save();
-    sendEmail(fname,email, otp);
+    await sendEmail(fname, email, otp);
 
     res.status(200).json({ message: 'New OTP sent to email' });
   } catch (error) {
@@ -171,15 +172,15 @@ export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
-    if (!user) throw new AppError('Invalid credentials', 401);
+    if (!user) throw new AppError('Invalid credentials.Please check your email..', 401);
 
     if (!user.is_active || !user.verification.user.is_verified) {
-      throw new AppError('Account not verified', 403);
+      throw new AppError('Account not verified.pls verify your account by otp...', 403);
     }
-    if (user.is_delete) throw new AppError('Account disabled', 403);
+    if (user.is_delete) throw new AppError('your Account has deleted.Please make another one....', 403);
 
     const isMatch = await comparePassword(password, user.password);
-    if (!isMatch) throw new AppError('Invalid credentials', 401);
+    if (!isMatch) throw new AppError('Invalid Password', 401);
 
     const token = generateToken(user._id);
 
@@ -199,97 +200,61 @@ export const login = async (req, res, next) => {
   }
 };
 
-// export const updateProfile = async (req, res, next) => {
-//   try {
-//    
-//     const updates = {};
-//     if (fname !== undefined) updates.fname = fname;
-//     if (lname !== undefined) updates.lname = lname;
-//     if (gender !== undefined) updates.gender = gender;
-//     if (address !== undefined) updates.address = address;
-
-//     const user = await User.findByIdAndUpdate(userId, updates, {
-//       new: true,
-//       runValidators: true,
-//     }).select('-password');
-
-//     if (!user) throw new AppError('User not found', 404);
-//     if (req.file) {
-//       if (user.profileimage.public_id) await deleteImage(user.profileimage.public_id);
-//      data.profileimage = await uploadImage(req.file.path);
-//     }
-
-//     res.status(200).json({ message: 'Profile updated', user });
-//   } catch (error) {
-//     next(error);
-//   }
-// };
-
 export const updateProfile = async (req, res, next) => {
   try {
     const userId = req.user._id;
     const { fname, lname, gender, address } = req.body;
 
-
     const updates = {};
+    if (fname) updates.fname = fname;
+    if (lname) updates.lname = lname;
+    if (gender) updates.gender = gender;
+    if (address) updates.address = address;
 
-    if (fname !== undefined) updates.fname = fname;
-    if (lname !== undefined) updates.lname = lname;
-    if (gender !== undefined) updates.gender = gender;
-    if (address !== undefined) updates.address = address;
-
-    // Profile image update
     if (req.file) {
-      const oldUser = await User.findById(userId);
+      const currentUser = await User.findById(userId);
+      if (!currentUser) throw new AppError('User not found', 404);
 
-      if (!oldUser) {
-        return res.status(404).json({ message: 'User not found' });
+      // Purani image delete karo Cloudinary se
+      if (currentUser.profileimage?.public_id) {
+        await deleteImage(currentUser.profileimage.public_id);
       }
 
-      // Delete old image
-      if (oldUser.profileimage?.public_id) {
-        await deleteImage(oldUser.profileimage.public_id);
-      }
+      // Nayi image upload karo
+      const uploaded = await uploadImage(req.file.path);
+      updates.profileimage = uploaded;
 
-      // Upload new image
-      const uploadedImage = await uploadImage(req.file.path);
-
-      updates.profileimage = uploadedImage;
+      // Local file delete karo
+      fs.unlinkSync(req.file.path);
     }
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      updates,
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).select('-password');
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await User.findByIdAndUpdate(userId, updates, {
+      new: true,
+      runValidators: true,
+    }).select('-password');
 
     res.status(200).json({
       message: 'Profile updated successfully',
       user,
     });
-
   } catch (error) {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     next(error);
   }
 };
-
 
 export const forgotPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
     if (!user) throw new AppError('User not found', 404);
-    const {fname}= user
 
+    const { fname } = user;
     const verification = user.verification.user;
     const now = new Date();
+
     if (verification.lock_until && verification.lock_until > now) {
       const remaining = Math.ceil((verification.lock_until - now) / 1000 / 60);
       throw new AppError(`Account locked. Try after ${remaining} minute(s).`, 403, {
@@ -305,13 +270,7 @@ export const forgotPassword = async (req, res, next) => {
     verification.otp_attempts = 0;
 
     await user.save();
-    console.log("CALLING SEND EMAIL:", fname, email, otp);
-
-await sendEmail(fname, email, otp);
-
-console.log("SEND EMAIL COMPLETED");
-
-    await sendEmail(fname,email, otp);
+    await sendEmail(fname, email, otp);
 
     res.status(200).json({ message: 'Password reset OTP sent to email' });
   } catch (error) {
@@ -326,8 +285,8 @@ export const resetPassword = async (req, res, next) => {
     if (!user) throw new AppError('User not found', 404);
 
     const verification = user.verification.user;
-
     const now = new Date();
+
     if (verification.lock_until && verification.lock_until > now) {
       const remaining = Math.ceil((verification.lock_until - now) / 1000 / 60);
       throw new AppError(`Account locked. Try after ${remaining} minute(s).`, 403, {
